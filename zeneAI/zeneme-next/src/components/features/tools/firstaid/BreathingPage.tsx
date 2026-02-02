@@ -1,0 +1,324 @@
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Volume2, VolumeX, RefreshCw, ArrowRight } from 'lucide-react';
+import { useZenemeStore } from '../../../../hooks/useZenemeStore';
+import { Button } from '../../../ui/button';
+import { BreathingArcTimer } from './BreathingArcTimer';
+
+interface BreathingPageProps {
+  onComplete: () => void;
+}
+
+export function BreathingPage({ onComplete }: BreathingPageProps) {
+  const { t } = useZenemeStore();
+  const [completedCycle, setCompletedCycle] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
+  const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale'>('inhale');
+
+  // ✅ 用 BreathingArcTimer 的 inhale 作为每个 16s 周期起点，强制背景“重置对齐”
+  const [waveCycleKey, setWaveCycleKey] = useState(0);
+
+  // Timer state
+  const [remainingSeconds, setRemainingSeconds] = useState(60);
+  const [isTimerRunning, setIsTimerRunning] = useState(true);
+  const [showNudge, setShowNudge] = useState(false);
+  const autoNavTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Timer logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    if (isTimerRunning && remainingSeconds > 0) {
+      interval = setInterval(() => {
+        setRemainingSeconds((prev) => {
+          if (prev <= 1) {
+            // Timer finished
+            setIsTimerRunning(false);
+            setShowNudge(true);
+
+            // Auto navigate after 1.5s (Strategy A)
+            autoNavTimeoutRef.current = setTimeout(() => {
+              onComplete();
+            }, 1500);
+
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (autoNavTimeoutRef.current) clearTimeout(autoNavTimeoutRef.current);
+    };
+  }, [isTimerRunning, remainingSeconds, onComplete]);
+
+  const handleOneMoreMinute = () => {
+    if (autoNavTimeoutRef.current) {
+      clearTimeout(autoNavTimeoutRef.current);
+      autoNavTimeoutRef.current = null;
+    }
+    setRemainingSeconds(60);
+    setIsTimerRunning(true);
+    setShowNudge(false);
+  };
+
+  const handleNextStep = () => {
+    if (autoNavTimeoutRef.current) {
+      clearTimeout(autoNavTimeoutRef.current);
+    }
+    onComplete();
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // 仅用于停止时的静态位置兜底（不依赖 tailwind）
+  const getWavePosition = () => {
+    switch (breathPhase) {
+      case 'inhale':
+        return '-30%';
+      case 'hold':
+        return '-30%';
+      case 'exhale':
+        return '10%';
+      default:
+        return '0%';
+    }
+  };
+
+  /**
+   * ✅ 4-4-4-4（16s）节奏：
+   * 0-4s   吸气：低 -> 高
+   * 4-8s   保持：高（冻结）
+   * 8-12s  呼气：高 -> 低（第4秒到最低）
+   * 12-16s 保持：低（冻结）
+   */
+  const CYCLE_DURATION = 16;
+  const times = [0, 0.25, 0.5, 0.75, 1];
+
+  // y：用重复值实现 hold 冻结
+  const waveY = ['0%', '-60%', '-60%', '0%', '0%'];
+
+  // 形状 morph：同样用重复值实现 hold 冻结
+  const d1High = 'M-240,500 Q120,135 480,500 T1200,500 T1920,500 L1920,3000 L-240,3000 Z';
+  const d1Low = 'M-240,500 Q120,865 480,500 T1200,500 T1920,500 L1920,3000 L-240,3000 Z';
+
+  const d2High = 'M-240,550 Q360,-50 960,550 T1680,550 T2400,550 L2400,3000 L-240,3000 Z';
+  const d2Low = 'M-240,550 Q360,1150 960,550 T1680,550 T2400,550 L2400,3000 L-240,3000 Z';
+
+  const d3High = 'M-240,600 Q120,-325 480,600 T1200,600 T1920,600 L1920,3000 L-240,3000 Z';
+  const d3Low = 'M-240,600 Q120,1525 480,600 T1200,600 T1920,600 L1920,3000 L-240,3000 Z';
+
+  const waveTransition = {
+    duration: CYCLE_DURATION,
+    times,
+    repeat: Infinity,
+    ease: 'easeInOut' as const,
+  };
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-transparent">
+      {/* Wave animations */}
+      {/* ✅ key 让背景在 inhale 时“重置对齐”到 16s 周期起点 */}
+      <div
+        key={waveCycleKey}
+        className="absolute inset-0"
+        style={{ transform: 'translateY(530px)' }}
+      >
+        {/* Layer 1 */}
+        <motion.div
+          className="absolute inset-0 w-full h-full"
+          animate={isTimerRunning ? { y: waveY } : { y: getWavePosition() }}
+          transition={isTimerRunning ? waveTransition : { duration: 0 }}
+        >
+          <svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 1440 3000"
+            preserveAspectRatio="none"
+            style={{ opacity: 0.3 }}
+          >
+            <motion.path
+              d="M-240,500 Q120,350 480,500 T1200,500 T1920,500 L1920,3000 L-240,3000 Z"
+              fill="url(#gradient1)"
+              animate={
+                isTimerRunning
+                  ? { d: [d1Low, d1High, d1High, d1Low, d1Low] }
+                  : { d: breathPhase === 'exhale' ? d1Low : d1High }
+              }
+              transition={isTimerRunning ? waveTransition : { duration: 0 }}
+            />
+            <defs>
+              <linearGradient id="gradient1" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#4c1d95" stopOpacity="0.4" />
+                <stop offset="100%" stopColor="#2e1065" stopOpacity="0.6" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </motion.div>
+
+        {/* Layer 2 */}
+        <motion.div
+          className="absolute inset-0 w-full h-full"
+          animate={isTimerRunning ? { y: waveY } : { y: getWavePosition() }}
+          transition={isTimerRunning ? waveTransition : { duration: 0 }}
+        >
+          <svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 1440 3000"
+            preserveAspectRatio="none"
+            style={{ opacity: 0.4 }}
+          >
+            <motion.path
+              d="M-240,550 Q360,400 960,550 T1680,550 T2400,550 L2400,3000 L-240,3000 Z"
+              fill="url(#gradient2)"
+              animate={
+                isTimerRunning
+                  ? { d: [d2Low, d2High, d2High, d2Low, d2Low] }
+                  : { d: breathPhase === 'exhale' ? d2Low : d2High }
+              }
+              transition={isTimerRunning ? waveTransition : { duration: 0 }}
+            />
+            <defs>
+              <linearGradient id="gradient2" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#5b21b6" stopOpacity="0.5" />
+                <stop offset="100%" stopColor="#4c1d95" stopOpacity="0.7" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </motion.div>
+
+        {/* Layer 3 */}
+        <motion.div
+          className="absolute inset-0 w-full h-full"
+          animate={isTimerRunning ? { y: waveY } : { y: getWavePosition() }}
+          transition={isTimerRunning ? waveTransition : { duration: 0 }}
+        >
+          <svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 1440 3000"
+            preserveAspectRatio="none"
+            style={{ opacity: 0.5 }}
+          >
+            <motion.path
+              d="M-240,600 Q120,450 480,600 T1200,600 T1920,600 L1920,3000 L-240,3000 Z"
+              fill="url(#gradient3)"
+              animate={
+                isTimerRunning
+                  ? { d: [d3Low, d3High, d3High, d3Low, d3Low] }
+                  : { d: breathPhase === 'exhale' ? d3Low : d3High }
+              }
+              transition={isTimerRunning ? waveTransition : { duration: 0 }}
+            />
+            <defs>
+              <linearGradient id="gradient3" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#6d28d9" stopOpacity="0.6" />
+                <stop offset="100%" stopColor="#5b21b6" stopOpacity="0.8" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </motion.div>
+      </div>
+
+      <div className="w-full h-full relative flex flex-col items-center justify-center z-10">
+        <div className="absolute top-12 left-0 right-0 z-10 px-12">
+          <div className="max-w-4xl mx-auto mt-[30px]">
+            <div className="mb-4">
+              <div className="inline-block px-4 py-2 rounded-full bg-[#121212]/80 backdrop-blur-md text-gray-300 text-sm mb-4 border border-white/5">
+                {t.breathing.stepLabel}
+              </div>
+              <div className="h-2 bg-white/10 backdrop-blur-md rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-[#8B5CF6] to-violet-600 w-1/3 rounded-full" />
+              </div>
+            </div>
+
+            {/* Countdown Timer */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-white/40 text-sm font-medium tracking-widest tabular-nums">
+                {formatTime(remainingSeconds)}
+              </span>
+            </div>
+
+            <div className="mb-8">
+              <BreathingArcTimer
+                isPlaying={isTimerRunning}
+                onPhaseChange={(p) => {
+                  setBreathPhase(p);
+
+                  // ✅ inhale = 新一轮 16s 周期开始：背景重新对齐
+                  if (p === 'inhale') {
+                    setCompletedCycle(true);
+                    setWaveCycleKey((k) => k + 1);
+                  }
+                }}
+              />
+            </div>
+
+            <h1 className="text-4xl text-white mb-4">四步呼吸法</h1>
+            <p className="text-gray-400 text-lg max-w-3xl">
+              四步呼吸法也叫箱式呼吸法，每步4秒合计16秒；吸气4秒—停4秒—呼气4秒—停4秒；通过节律呼吸激活副交感神经，打断情绪反应，让大脑恢复稳定与掌控。保持这个节奏，您会感受到内心重归平静。
+            </p>
+          </div>
+        </div>
+
+        <div className="absolute bottom-12 left-0 right-0 z-10 px-12">
+          <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
+            <button
+              onClick={() => setSoundOn(!soundOn)}
+              className="flex items-center gap-2 px-4 py-2 text-gray-300 hover:text-white transition-colors backdrop-blur-md bg-white/10 rounded-full border border-white/5"
+            >
+              {soundOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              <span>{soundOn ? t.breathing.mute : t.breathing.soundOn}</span>
+            </button>
+
+            <button
+              onClick={onComplete}
+              className="px-8 py-3 rounded-full backdrop-blur-xl bg-gradient-to-r from-[#8B5CF6] to-violet-700 text-white hover:from-violet-600 hover:to-violet-800 transition-all shadow-lg"
+            >
+              {t.breathing.skipButton}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Completion Nudge / Toast */}
+      <AnimatePresence>
+        {showNudge && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="absolute bottom-28 z-50 flex flex-col items-center gap-4 bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/10 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4"
+          >
+            <div className="text-center space-y-1">
+              <h3 className="text-white font-semibold text-lg">做得很好</h3>
+              <p className="text-slate-400 text-sm">我们进入下一步。</p>
+            </div>
+
+            <div className="flex gap-3 w-full">
+              <Button
+                onClick={handleOneMoreMinute}
+                variant="outline"
+                className="flex-1 border-white/10 bg-white/5 hover:bg-white/10 text-white h-10 text-sm"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                再来 1 分钟
+              </Button>
+              <Button
+                onClick={handleNextStep}
+                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white h-10 text-sm font-medium"
+              >
+                下一步
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
